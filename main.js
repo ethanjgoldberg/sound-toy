@@ -1,6 +1,6 @@
 var ctx = new AudioContext();
 
-var BUFFSIZE = 16384;
+var BUFFSIZE = 256;
 var AP = function (context, defaultValue) {
     var scriptNode = context.createScriptProcessor(BUFFSIZE, 0, 1),
 	gainNode = context.createGain(),
@@ -15,12 +15,42 @@ var AP = function (context, defaultValue) {
 
     audioParam = gainNode.gain;
     audioParam.value = defaultValue;
-    audioParam.connect = function (destination, input) {
-	gainNode.connect(destination, 0, input);
+    audioParam.connect = function (destination) {
+	gainNode.connect(destination, 0);
     }
     audioParam._nodes = [scriptNode, gainNode];
     return audioParam;
 }
+
+var variables = {};
+
+var SetVar = React.createClass({
+    render: function () {
+	if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
+	    this.props.scope.state.throughs[this.props.name] = ctx.createGain();
+	return (
+		<div className="node">
+		<span className='var'>{this.props.name}</span>:
+	    { React.cloneElement(React.Children.only(this.props.children),
+				 { to: this.props.scope.state.throughs[this.props.name] })
+	    }
+	    </div>
+	);
+    }
+});
+
+var GetVar = React.createClass({
+    connect: function (to) {
+	if (!to) return;
+	if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
+	    this.props.scope.state.throughs[this.props.name] = ctx.createGain();
+	this.props.scope.state.throughs[this.props.name].connect(to);
+    },
+    render: function () {
+	this.connect(this.props.to);
+	return <span className='var'>{ this.props.name }</span>
+    }
+});
 
 var Attr = React.createClass({
     render: function () {
@@ -29,7 +59,7 @@ var Attr = React.createClass({
 		{this.props.name}:
 	    { React.cloneElement(React.Children.only(this.props.children), {
 		to: this.props.to,
-		name: this.props.name
+		scope: this.props.scope
 	    })
 	    }
 	    </div>
@@ -39,15 +69,19 @@ var Attr = React.createClass({
 
 var Value = React.createClass({
     getInitialState: function () {
+	var node = AP(ctx, this.props.val);
 	return {
-	    value: this.props.val
+	    value: this.props.val,
+	    node: node
 	};
     },
     connect: function (to) {
-	console.log(this.props.to, this.props);
-	to.value = this.state.value;
+	if (!to) return;
+	this.state.node.connect(to);
+	//to.value = this.state.value;
     },
     handleChange: function (event) {
+	this.state.node.value = event.target.value;
 	this.setState({
 	    value: event.target.value
 	});
@@ -65,6 +99,7 @@ var List = React.createClass({
 	};
     },
     connect: function (to) {
+	if (!to) return;
 	to.value = this.state.value;
     },
     handleChange: function (event) {
@@ -99,6 +134,7 @@ var Osc = React.createClass({
 	}
     },
     connect: function (to) {
+	if (!to) return;
 	this.state.offset.connect(to);
     },
     render: function () {
@@ -116,7 +152,8 @@ var Osc = React.createClass({
 		    
 		    if (to == null) return c;
 		    return React.cloneElement(c, {
-			to: to
+			to: to,
+			scope: this.props.scope
 		    });
 		}.bind(this))
 		}
@@ -167,6 +204,7 @@ var Array = React.createClass({
 	}
     },
     connect: function (to) {
+	if (!to) return;
 	this.state.gain.connect(to);
     },
     render: function () {
@@ -184,7 +222,8 @@ var Array = React.createClass({
 		    }
 		    if (to == null) return c;
 		    return React.cloneElement(c, {
-			to: to
+			to: to,
+			scope: this.props.scope
 		    });
 		}.bind(this))
 		}
@@ -197,15 +236,47 @@ var Dest = React.createClass({
 	return (<div>
 		{ React.Children.map(this.props.children, function (c) {
 		    return React.cloneElement(c, {
-			to: ctx.destination
+			to: ctx.destination,
+			scope: this.props.scope
 		    });
-		}) }
+		}.bind(this)) }
 		</div>
 	       );
     }
 });
 
+var Scope = React.createClass({
+    getInitialState: function () {
+	return {
+	    throughs: {}
+	};
+    },
+    render: function () {
+	return (<div>{
+	React.Children.map(this.props.children, function (c) {
+	    return React.cloneElement(c, { scope: this });
+	}.bind(this))
+	}</div>);
+    }
+});
 ReactDOM.render(
+	<Scope>
+	<SetVar name='blue'>
+	<Array>
+	<Attr name='vals'><List val={[1,1,1,1,1.33,1.33,1,1, 1.5, 1.33, 1, 1]} /></Attr>
+	<Attr name='base'><Value val={110} /></Attr>
+	<Attr name='frequency'><Value val={.25} /></Attr>
+	</Array>
+	</SetVar>
+
+	<SetVar name='speed'>
+	<Value val={1} />
+	</SetVar>
+
+	<SetVar name='gain'>
+	<Value val={1} />
+	</SetVar>
+	
 	<Dest>
 	<Osc name="fm'ed">
 	
@@ -213,73 +284,31 @@ ReactDOM.render(
 	<Array name='mel'>
 	<Attr name='vals'><List val={[1, 2, 1.8, 1.5]} /></Attr>
 	<Attr name='base'>
-	<Array name='blue'>
-	<Attr name='vals'><List val={[1,1,1,1,1.33,1.33,1,1, 1.5, 1.33, 1, 1]} /></Attr>
-	<Attr name='base'><Value val={110} /></Attr>
-	<Attr name='frequency'><Value val={.25} /></Attr>
-	</Array>
+	<GetVar name='blue' />
 	</Attr>
 	<Attr name='frequency'><Value val={1} /></Attr>
 	</Array>
 	</Attr>
 
-	<Attr name='gain'>
-	<Value val={1}></Value>
-	</Attr>
+	<Attr name='gain'><GetVar name='gain' /></Attr>
 
 	<Attr name='offset'>
 	<Value val={0}></Value>
 	</Attr>
 	</Osc>
-	</Dest>,
-    document.getElementById('root')
-);
 
-/*
-ReactDOM.render(
-	<Dest>
-	<Osc name="fm'ed">
+	<Osc>
 	<Attr name='frequency'>
-
-    
-	<Osc name='sin'>
-	
-	<Attr name='frequency'>
-	<Value val={.25}></Value>
-	</Attr>
-	
-	<Attr name='gain'>
-	<Value val={20}></Value>
-	</Attr>
-
-	<Attr name='offset'>
-	<Array name='mel'>
-	<Attr name='vals'><List val={[1, 2, 1.8, 1.5]} /></Attr>
-	<Attr name='base'>
-	<Array name='blue'>
-	<Attr name='vals'><List val={[1, 1, 1, 1, 1.33, 1.33, 1, 1, 1.5, 1.33, 1, 1]} /></Attr>
-	<Attr name='base'><Value val={110} /></Attr>
-	<Attr name='duration'><Value val={4} /></Attr>
+	<Array>
+	<Attr name='frequency'><Value val={3} /></Attr>
+	<Attr name='vals'><List val={[0.5,0,0, 1,1.8,1, 0.5,0,0, 1.125,0,1.125]} /></Attr>
+	<Attr name='base'><GetVar name='blue' /></Attr>
 	</Array>
 	</Attr>
-	<Attr name='duration'><Value val={1} /></Attr>
-	</Array>
-	</Attr>
-	
+	<Attr name='gain'><GetVar name='gain' /></Attr>
 	</Osc>
-
     
-    </Attr>
-
-	<Attr name='gain'>
-	<Value val={1}></Value>
-	</Attr>
-
-	<Attr name='offset'>
-	<Value val={0}></Value>
-	</Attr>
-	</Osc>
-	</Dest>,
+    </Dest>
+	</Scope>,
     document.getElementById('root')
 );
-*/

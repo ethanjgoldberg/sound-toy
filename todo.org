@@ -1,13 +1,14 @@
 * features
-- [ ] variables
-  - [ ] getvar
-  - [ ] setvar
+- [X] variables
+  - [X] getvar
+  - [X] setvar
 - [ ] more complex oscillator
   - [ ] types (saw, sqr, etc.)
     - [ ] non-numeric values (drop down menu, in particular)
   - [ ] wave table?
 - [ ] samples
 - [X] array values
+- [ ] random values
 - [ ] encapsulation
 - [ ] save/load
 - [ ] share on the network
