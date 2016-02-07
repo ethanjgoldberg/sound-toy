@@ -32,7 +32,9 @@ var SetVar = React.createClass({
 		<div className="node">
 		<span className='var'>{this.props.name}</span>:
 	    { React.cloneElement(React.Children.only(this.props.children),
-				 { to: this.props.scope.state.throughs[this.props.name] })
+				 { to: this.props.scope.state.throughs[this.props.name],
+				   scope: this.props.scope
+				 })
 	    }
 	    </div>
 	);
@@ -56,7 +58,8 @@ var Attr = React.createClass({
     render: function () {
 	return (
 		<div className="attr">
-		{this.props.name}:
+		{this.props.name}
+	    { this.props.varname? '(' + this.props.varname + ')': ''}:
 	    { React.cloneElement(React.Children.only(this.props.children), {
 		to: this.props.to,
 		scope: this.props.scope
@@ -66,6 +69,29 @@ var Attr = React.createClass({
 	);
     }
 });
+
+var Expression = React.createClass({
+    getInitialState: function () {
+	return {
+	    value: this.props.val,
+	    code: math.compile(this.props.val)
+	};
+    },
+    connect: function (to) {
+	if (!to) return;
+	to.value = this.state.code;
+    },
+    handleChange: function (event) {
+	this.setState({
+	    value: event.target.value,
+	    code: math.compile(event.target.value)
+	});
+    },
+    render: function () {
+	this.connect(this.props.to);
+	return (<input type="text" value={this.state.value} onChange={this.handleChange} />);
+    }
+});    
 
 var Value = React.createClass({
     getInitialState: function () {
@@ -164,7 +190,7 @@ var Osc = React.createClass({
 
 var Array = React.createClass({
     getInitialState: function () {
-	var BS = 4096 * 4;
+	var BS = 256;
 	var node = ctx.createScriptProcessor(BS, 1, 1);
 	node.onaudioprocess = function (event) {
 	    var idx = this.state.idx || 0;
@@ -231,6 +257,69 @@ var Array = React.createClass({
     }
 });
 
+var Arith = React.createClass({
+    initNode: function () {
+	var BS = 256;
+	var node = ctx.createScriptProcessor(BS, this.state.vars.length, 1);
+	var varMap = {};
+	for (var i = 0; i < this.state.vars.length; i++) {
+	    varMap[this.state.vars[i]] = i;
+	}
+
+	node.onaudioprocess = function (event) {
+	    var output = event.outputBuffer.getChannelData(0)
+	    for (var i = 0; i < BS; i++) {
+		var scope = {};
+		for (var k in varMap) {
+		    scope[k] = event.inputBuffer.getChannelData(varMap[k])[i];
+		}
+		output[i] = this.state.expression.value.eval(scope);
+	    }
+	}.bind(this);
+
+	for (var i = 0; i < this.state.vars.length; i++) {
+	    if (!this.state.throughs.hasOwnProperty(this.state.vars[i]))
+		this.state.throughs[this.state.vars[i]] = ctx.createGain();
+	    this.state.throughs[this.state.vars[i]].connect(node, 0, i);
+	}
+
+	return node;
+    },
+    getInitialState: function () {
+	return {
+	    expression: { value: '' },
+	    node: null,
+	    vars: ['x'],
+	    throughs: {}
+	};
+    },
+    connect: function (to) {
+	if (!to) return;
+	this.state.node.connect(to);
+    },
+    render: function () {
+	if (this.state.node == null)
+	    this.state.node = this.initNode();
+
+	this.connect(this.props.to);
+	return (<div className="node">
+		{ React.Children.map(this.props.children, function (c) {
+		    var to = null;
+		    if (c.props.name == 'expression') {
+			to = this.state.expression;
+		    } else if (c.props.name == 'variable') {
+			to = this.state.throughs[c.props.varname];
+		    }
+
+		    return React.cloneElement(c, { to: to, key: c.props.varname,
+						   scope: this.props.scope });
+		}.bind(this))
+		}
+		
+		</div>);
+    }
+});
+
 var Dest = React.createClass({
     render: function () {
 	return (<div>
@@ -265,7 +354,10 @@ ReactDOM.render(
 	<Array>
 	<Attr name='vals'><List val={[1,1,1,1,1.33,1.33,1,1, 1.5, 1.33, 1, 1]} /></Attr>
 	<Attr name='base'><Value val={110} /></Attr>
-	<Attr name='frequency'><Value val={.25} /></Attr>
+	<Attr name='frequency'><Arith>
+	<Attr name='expression'><Expression val='x / 4' /></Attr>
+	<Attr name='variable' varname='x'><GetVar name='speed' /></Attr>
+	</Arith></Attr>
 	</Array>
 	</SetVar>
 
@@ -274,7 +366,7 @@ ReactDOM.render(
 	</SetVar>
 
 	<SetVar name='gain'>
-	<Value val={1} />
+	<Value val={0} />
 	</SetVar>
 	
 	<Dest>
@@ -282,11 +374,12 @@ ReactDOM.render(
 	
 	<Attr name='frequency'>
 	<Array name='mel'>
-	<Attr name='vals'><List val={[1, 2, 1.8, 1.5]} /></Attr>
-	<Attr name='base'>
-	<GetVar name='blue' />
-	</Attr>
-	<Attr name='frequency'><Value val={1} /></Attr>
+	<Attr name='vals'><List val={[1,2,1.5,1.2,1,2,1.6,1.5]} /></Attr>
+	<Attr name='base'><GetVar name='blue' /></Attr>
+	<Attr name='frequency'><Arith>
+	<Attr name='expression'><Expression val='2 * x' /></Attr>
+	<Attr name='variable' varname='x'><GetVar name='speed' /></Attr>
+	</Arith></Attr>
 	</Array>
 	</Attr>
 
@@ -300,8 +393,13 @@ ReactDOM.render(
 	<Osc>
 	<Attr name='frequency'>
 	<Array>
-	<Attr name='frequency'><Value val={3} /></Attr>
-	<Attr name='vals'><List val={[0.5,0,0, 1,1.8,1, 0.5,0,0, 1.125,0,1.125]} /></Attr>
+	<Attr name='frequency'>
+	<Arith>
+	<Attr name='expression'><Expression val='6 * x' /></Attr>
+	<Attr name='variable' varname='x'><GetVar name='speed' /></Attr>
+	</Arith>
+	</Attr>
+	<Attr name='vals'><List val={[4,3,2.6,3.2,3,2,1,3,2.6,3.2,3,2]} /></Attr>
 	<Attr name='base'><GetVar name='blue' /></Attr>
 	</Array>
 	</Attr>
