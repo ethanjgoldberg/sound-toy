@@ -1,0 +1,35 @@
+.right {
+    float: right;
+    font-weight: bold;
+}
+
+.node {
+    border: 1px solid black;
+    margin: 4px;
+    background: white;
+    min-width: 200px;
+    display: inline-block;
+}
+
+.attr {
+    margin: 4px;
+    margin-top: 16px;
+    margin-left: 16px;
+    border-top: 1px solid grey;
+    border-bottom: 1px solid grey;
+}
+
+.attr:nth-child(even) {
+    background: #eee;
+}
+
+.attr:nth-child(odd) {
+    background: #ddd;
+}
+    
+
+#field {
+    height: 400px;
+    width: 400px;
+    border: 1px solid black;
+}
