@@ -1,0 +1,16 @@
+* features
+- [ ] variables
+  - [ ] getvar
+  - [ ] setvar
+- [ ] more complex oscillator
+  - [ ] types (saw, sqr, etc.)
+    - [ ] non-numeric values (drop down menu, in particular)
+  - [ ] wave table?
+- [ ] samples
+- [X] array values
+- [ ] encapsulation
+- [ ] save/load
+- [ ] share on the network
+
+* gui editor 
+it's not so bad right now to edit the xml directly, but a gui editor is of course the goal.
