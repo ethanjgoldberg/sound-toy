@@ -2,12 +2,22 @@
 - [X] variables
   - [X] getvar
   - [X] setvar
+- [ ] effects
+  - [ ] reverb
+  - [ ] delay
+  - [ ] filter
 - [ ] more complex oscillator
   - [ ] types (saw, sqr, etc.)
     - [ ] non-numeric values (drop down menu, in particular)
   - [ ] wave table?
 - [ ] samples
-- [X] array values
+- [ ] array values
+  - [ ] make them show the length of the array
+  - [ ] see if they can be made temporally consistent. maybe not.
+  - [ ] do it so they can have easier editing
+  - [ ] the current "step sequencer" should really be replaced with a "piano roll"
+    - [ ] piano roll
+      how would this even work? in particular, currently each component outputs a signal = an array of values, one value per time. perhaps the piano roll sits outside a synth plugin and triggers the synth accordingly.
 - [X] arithmetic node
 - [X] random values
 - [ ] encapsulation
