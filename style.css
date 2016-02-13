@@ -1,3 +1,9 @@
+.note {
+    position: relative;
+    background: #c00;
+    height: 4px;
+}
+
 .right {
     float: right;
     font-weight: bold;
