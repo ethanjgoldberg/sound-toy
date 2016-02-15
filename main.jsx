@@ -44,15 +44,25 @@ var Variable = React.createClass({
   connect: function (to) {
     if (!to) return;
     if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
-      this.props.scope.state.throughs[this.props.name] = ctx.createGain();
+      return;
     this.props.scope.state.throughs[this.props.name].connect(to);
   },
+  disconnect: function () {
+    if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
+      return;
+    this.props.scope.state.throughs[this.props.name].disconnect();
+  },
+  componentDidMount: function () {
+    this.connect(this.props.to);
+  },
+  componentWillUnmount: function () {
+    this.disconnect();
+  },
   handleNameChange: function (event) {
-    console.log(event.target.value);
+    this.disconnect();
     this.props.scope.handleChange(this.props.path.concat(['name']), event.target.value);
   },
   render: function () {
-    this.connect(this.props.to);
     return (
       <div className="node">
       <select value={this.props.name} onChange={this.handleNameChange}>
@@ -112,14 +122,73 @@ var Value = React.createClass({
   }
 });
 
-var List = React.createClass({
-  handleChange: function (event) {
-    if (this.props.onChange) {
-      this.props.onChange(event.target.value.split(/[ ,]+/).map(function (s) { return parseFloat(s) || 0; }));
+var Sequence = React.createClass({
+  handleValueChange: function (i) {
+    return function (event) {
+      this.props.scope.handleChange(this.props.path.concat(['values', i]), event.target.value);
+    }.bind(this)
+  },
+  handleClick: function (i, j) {
+    return function () {
+      this.props.scope.handleChange(this.props.path.concat(['steps', j]), i);
+    }.bind(this);
+  },
+  dupe: function () {
+    this.props.scope.handleChange(this.props.path.concat(['steps']), this.props.steps.concat(this.props.steps));
+  },
+  halve: function () {
+    this.props.scope.handleChange(this.props.path.concat(['steps', 'length']), Math.floor(this.props.steps.length / 2));
+  },
+  times2: function () {
+    var newSteps = [];
+    for (var i = 0; i < this.props.steps.length; i++) {
+      newSteps.push(this.props.steps[i]);
+      newSteps.push(this.props.steps[i]);
     }
+    this.props.scope.handleChange(this.props.path.concat(['steps']), newSteps);
+  },
+  addValue: function () {
+    this.props.scope.handleChange(this.props.path.concat(['values']), this.props.values.concat([0]));
   },
   render: function () {
-    return (<input type="text" value={this.props.values} onChange={this.handleChange} />);
+    var rows = {};
+    for (var i = 0; i < this.props.values.length; i++) {
+      var row = [];
+      for (var j = 0; j < this.props.steps.length; j++) {
+	row.push(<td key={j}
+		     className={'step ' + (this.props.steps[j] == i ? 'on' : 'off') + (this.props.index == j ? ' highlight' : '')}
+		     style={{width: (100 / this.props.steps.length) + '%' }}
+		     onClick={this.handleClick(i, j)} />);
+      }
+      rows[this.props.values[i]] = row;
+    }
+
+    return (
+      <div>
+      <table style={{width: 200}}>
+	<tbody>
+	  {
+	    this.props.values.map(function (v, i) {
+	      return (
+		<tr key={v + ' ' + i}>
+		  <td>
+		    <input key={'value_input_' + v + ' ' + i} className="val" type="number" value={v} onChange={this.handleValueChange(i)} />
+		  </td>
+		  {
+		    rows[v]
+		  }
+		</tr>
+	      );
+	    }.bind(this))
+	  }
+      	</tbody>
+	<a href="#" onClick={this.dupe}>dupe</a>
+	<a href="#" onClick={this.halve}>halve</a>
+	<a href="#" onClick={this.times2}>*2</a>
+      </table>
+      <a href="#" onClick={this.addValue}>add</a>
+      </div>
+    );
   }
 });
 
@@ -276,28 +345,90 @@ var Osc = React.createClass({
   }
 });
 
-var Array = React.createClass({
+var Sync = React.createClass({
   getInitialState: function () {
     var node = ctx.createScriptProcessor(BS, 1, 1);
+    node.onaudioprocess = function (event) {
+      var lastTick = this.state.lastTick || 0;
+      var frequency = event.inputBuffer.getChannelData(0);
+      var output = event.outputBuffer.getChannelData(0);
+
+      for (var i = 0; i < BS; i++) {
+	var samplesPerCycle = ctx.sampleRate / frequency[i];
+	output[i] = 0;
+	if (i >= lastTick + samplesPerCycle) {
+	  lastTick = i;
+	  output[i] = 1;
+	}
+      }
+      this.state.lastTick = lastTick - BS;
+    }.bind(this);
+
+    return {
+      node: node
+    };
+  },
+  connect: function (to) {
+    if (!to) return;
+    if (to == ctx.destination) return;
+    this.state.node.connect(to);
+  },
+  disconnect: function () {
+    this.state.node.disconnect();
+  },
+  componentDidMount: function () {
+    this.connect(this.props.to);
+  },
+  componentWillUnmount: function () {
+    this.disconnect();
+  },
+  render: function () {
+    return (
+      <div className='node'>
+	Sync
+	<Attributes attributeList={['frequency']}
+		    attributeMap={{
+			frequency: this.state.node
+		      }}
+		    scope={this.props.scope}
+		    attributes={this.props.attributes}
+		    path={this.props.path} />
+      </div>
+    );
+  }
+});
+  
+var Array = React.createClass({
+  getInitialState: function () {
+    var node = ctx.createScriptProcessor(BS, 2, 1);
     node.onaudioprocess = function (event) {
       var idx = this.state.idx || 0;
       var lastChange = this.state.lastChange || 0;
 
       var frequency = event.inputBuffer.getChannelData(0);
+      var sync = event.inputBuffer.getChannelData(1);
       //var base = event.inputBuffer.getChannelData(1);
       var output = event.outputBuffer.getChannelData(0);
 
       for (var i = 0; i < BS; i++) {
+	if (sync[i]) {
+	  idx = 0;
+	  lastChange = 0;
+	}
 	var samplesPerCycle = ctx.sampleRate / frequency[i];
 	if (i >= lastChange + samplesPerCycle) {
 	  lastChange = i;
 	  idx++;
-	  if (this.props.values.length == 0) idx = 0;
-	  else idx = idx % this.props.values.length;
+	  if (this.props.steps.length == 0) idx = 0;
+	  else idx = idx % this.props.steps.length;
 	}
-	output[i] = this.props.values[idx] || 0
+	output[i] = this.props.values[this.props.steps[idx]] || 0
       }
-      this.state.idx = idx;
+      if (idx != this.state.idx) {
+	this.setState({
+	  idx: idx
+	});
+      }
       this.state.lastChange = lastChange;
       
       this.state.lastChange -= BS;
@@ -306,12 +437,17 @@ var Array = React.createClass({
     var gain = ctx.createGain();
     node.connect(gain);
     
-    var frequency = AP(0);
-    frequency.connect(node);
+    var frequency = ctx.createGain();
+    var sync = ctx.createGain();
+    var merger = ctx.createChannelMerger(2);
+    frequency.connect(merger, 0, 0);
+    sync.connect(merger, 0, 1);
+    merger.connect(node);
     
     return {
       node: node,
       gain: gain,
+      sync: sync,
       frequency: frequency,
       attributes: this.props.attributes
     }
@@ -336,11 +472,12 @@ var Array = React.createClass({
   render: function () {
     return (
       <div className='node'>
-      <List values={this.props.values} onChange={this.handleValuesChange} />
-      <Attributes attributeList={['base', 'frequency']}
+      <Sequence values={this.props.values} steps={this.props.steps} onChange={this.handleValuesChange} scope={this.props.scope} path={this.props.path} index={this.state.idx} />
+      <Attributes attributeList={['base', 'frequency', 'sync']}
 		  attributeMap={{
 		      base: this.state.gain.gain,
-		      frequency: this.state.frequency
+		      frequency: this.state.frequency,
+		      sync: this.state.sync
 		    }}
 		  scope={this.props.scope}
 		  attributes={this.state.attributes}
@@ -454,10 +591,12 @@ var Scope = React.createClass({
       if (thing == 'array')
 	newNode = {
 	  tagName: Array,
-	  values: [1, 1, 1.6, 1.5],
+	  values: [1, 1.5, 1.6],
+	  steps: [0, 0, 2, 1],
 	  attributes: {
 	    frequency: { tagName: Value, value: 1 },
-	    base: { tagName: Value, value: 110 }
+	    base: { tagName: Value, value: 110 },
+	    sync: { tagName: Value, value: 0 }
 	  }
 	};
       if (thing == 'expression')
@@ -473,6 +612,13 @@ var Scope = React.createClass({
 	  tagName: Variable,
 	  name: Object.keys(this.state.variables)[0],
 	  attributes: {}
+	};
+      if (thing == 'sync')
+	newNode = {
+	  tagName: Sync,
+	  attributes: {
+	    frequency: { tagName: Value, value: 0 }
+	  }
 	};
       var r = Math.random();
       var dest = this.state.destination;
@@ -497,7 +643,6 @@ var Scope = React.createClass({
     this.setState(Delete(this.state, path));
   },
   handleMove: function (from, to) {
-    console.log(from, to);
     this.setState(Change(
       Change(this.state, to, Get(this.state, from)),
       from,
@@ -544,6 +689,7 @@ var Scope = React.createClass({
 	    <a href="#" onClick={this.handleAddClick('array')}>array</a>
 	    <a href="#" onClick={this.handleAddClick('expression')}>expression</a>
 	    <a href="#" onClick={this.handleAddClick('variable')}>get var</a>
+	    <a href="#" onClick={this.handleAddClick('sync')}>sync</a>
 	  </div>
 	</div>
 	{this.renderVariables(this.state.variables)}
@@ -569,7 +715,7 @@ var blankData = {
 };
 
 function Change(original, path, value) {
-  if (!value) return Delete(original, path);
+  if (value === undefined || value === false || value === null) return Delete(original, path);
   if (path.length == 0) return value;
   original[path[0]] = Change(original[path[0]], path.slice(1), value);
   return original;

@@ -24,7 +24,7 @@
 - [-] save/load
   - [X] serialization
   - [ ] write out, read in
-- [ ] share on the 
+- [ ] share on the net
 * gui editor 
 it's not so bad right now to edit the xml directly, but a gui editor is of course the goal.
 - [X] done!
