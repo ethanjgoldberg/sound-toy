@@ -50,7 +50,6 @@ var Variable = React.createClass({
     if (!to) return;
     if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
       return;
-    console.log(this.props.scope.state.throughs[this.props.name], to);
     this.props.scope.state.throughs[this.props.name].connect(to);
   },
   disconnect: function () {
@@ -64,8 +63,12 @@ var Variable = React.createClass({
   componentWillUnmount: function () {
     this.disconnect();
   },
-  componentDidUpdate: function () {
+  componentWillUpdate: function (nextProps) {
+    if (nextProps.name == this.props.name) return;
     this.disconnect();
+  },
+  componentDidUpdate: function (prevProps) {
+    if (prevProps.name == this.props.name) return;
     this.connect(this.props.to);
   },
   handleNameChange: function (event) {
@@ -73,7 +76,7 @@ var Variable = React.createClass({
   },
   render: function () {
     return (
-      <div className="node">
+      <div className="node" key={name}>
       <select value={this.props.name} onChange={this.handleNameChange}>
       {
 	Object.keys(this.props.scope.state.variables).map(function (v) {
@@ -409,24 +412,15 @@ var Sync = React.createClass({
   
 var Array = React.createClass({
   getInitialState: function () {
-    var node = ctx.createScriptProcessor(BS, 2, 1);
+    var node = ctx.createScriptProcessor(BS, 1, 1);
     node.onaudioprocess = function (event) {
       var idx = this.state.idx || 0;
-      var lastChange = this.state.lastChange || 0;
 
-      var frequency = event.inputBuffer.getChannelData(0);
-      var sync = event.inputBuffer.getChannelData(1);
-      //var base = event.inputBuffer.getChannelData(1);
+      var sync = event.inputBuffer.getChannelData(0);
       var output = event.outputBuffer.getChannelData(0);
 
       for (var i = 0; i < BS; i++) {
 	if (sync[i]) {
-	  idx = 0;
-	  lastChange = 0;
-	}
-	var samplesPerCycle = ctx.sampleRate / frequency[i];
-	if (i >= lastChange + samplesPerCycle) {
-	  lastChange = i;
 	  idx++;
 	  if (this.props.steps.length == 0) idx = 0;
 	  else idx = idx % this.props.steps.length;
@@ -439,26 +433,14 @@ var Array = React.createClass({
 	});
       }
       this.state.idx = idx;
-      this.state.lastChange = lastChange;
-      
-      this.state.lastChange -= BS;
     }.bind(this);
     
     var gain = ctx.createGain();
     node.connect(gain);
     
-    var frequency = ctx.createGain();
-    var sync = ctx.createGain();
-    var merger = ctx.createChannelMerger(2);
-    frequency.connect(merger, 0, 0);
-    sync.connect(merger, 0, 1);
-    merger.connect(node);
-    
     return {
       node: node,
       gain: gain,
-      sync: sync,
-      frequency: frequency,
       attributes: this.props.attributes
     }
   },
@@ -483,11 +465,10 @@ var Array = React.createClass({
     return (
       <div className='node'>
       <Sequence values={this.props.values} steps={this.props.steps} onChange={this.handleValuesChange} scope={this.props.scope} path={this.props.path} index={this.state.idx} />
-      <Attributes attributeList={['base', 'frequency', 'sync']}
+      <Attributes attributeList={['base', 'sync']}
 		  attributeMap={{
 		      base: this.state.gain.gain,
-		      frequency: this.state.frequency,
-		      sync: this.state.sync
+		      sync: this.state.node
 		    }}
 		  scope={this.props.scope}
 		  attributes={this.state.attributes}
@@ -604,9 +585,16 @@ var Scope = React.createClass({
 	  values: [1, 1.5, 1.6],
 	  steps: [0, 0, 2, 1],
 	  attributes: {
-	    frequency: { tagName: Value, value: 1 },
 	    base: { tagName: Value, value: 110 },
-	    sync: { tagName: Value, value: 0 }
+	    sync: {
+	      tagName: Sync,
+	      attributes: {
+		seconds: {
+		  tagName: Value,
+		  value: 1
+		}
+	      }
+	    }
 	  }
 	};
       if (thing == 'expression')
