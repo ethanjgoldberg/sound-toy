@@ -41,11 +41,11 @@ var SetVariable = React.createClass({
 });
 
 var Variable = React.createClass({
-  connect: function (name, to) {
+  connect: function (to) {
     if (!to) return;
-    if (!this.props.scope.state.throughs.hasOwnProperty(name))
+    if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
       return;
-    this.props.scope.state.throughs[name].connect(to);
+    this.props.scope.state.throughs[this.props.name].connect(to);
   },
   disconnect: function () {
     if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
@@ -58,10 +58,12 @@ var Variable = React.createClass({
   componentWillUnmount: function () {
     this.disconnect();
   },
-  handleNameChange: function (event) {
+  componentDidUpdate: function () {
     this.disconnect();
+    this.connect(this.props.to);
+  },
+  handleNameChange: function (event) {
     this.props.scope.handleChange(this.props.path.concat(['name']), event.target.value);
-    this.connect(event.target.value, this.props.to);
   },
   render: function () {
     return (
