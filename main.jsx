@@ -1,6 +1,11 @@
 var ctx = new AudioContext();
 
-var BS = 256 * 4;
+console.log(window.location);
+var BS = window.location.search
+       ? (Math.pow(2, parseInt(window.location.search.slice(1)))*256)
+  : 256 * 4;
+
+console.log(BS);
 
 var ONES = ctx.createScriptProcessor(BS, 0, 1);
 var outputBuffer = new Float32Array(BS);
@@ -45,6 +50,7 @@ var Variable = React.createClass({
     if (!to) return;
     if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
       return;
+    console.log(this.props.scope.state.throughs[this.props.name], to);
     this.props.scope.state.throughs[this.props.name].connect(to);
   },
   disconnect: function () {
@@ -53,7 +59,7 @@ var Variable = React.createClass({
     this.props.scope.state.throughs[this.props.name].disconnect();
   },
   componentDidMount: function () {
-    this.connect(this.props.name, this.props.to);
+    this.connect(this.props.to);
   },
   componentWillUnmount: function () {
     this.disconnect();
@@ -168,14 +174,17 @@ var Sequence = React.createClass({
 
     return (
       <div>
+      <a href="#" onClick={this.dupe}>dupe</a>
+      <a href="#" onClick={this.halve}>halve</a>
+      <a href="#" onClick={this.times2}>*2</a>
       <table style={{width: 200}}>
 	<tbody>
 	  {
 	    this.props.values.map(function (v, i) {
 	      return (
-		<tr key={v + ' ' + i}>
+		<tr key={i}>
 		  <td>
-		    <input key={'value_input_' + v + ' ' + i} className="val" type="number" value={v} onChange={this.handleValueChange(i)} />
+		    <input className="val" type="text" value={v} onChange={this.handleValueChange(i)} />
 		  </td>
 		  {
 		    rows[v]
@@ -185,9 +194,6 @@ var Sequence = React.createClass({
 	    }.bind(this))
 	  }
       	</tbody>
-	<a href="#" onClick={this.dupe}>dupe</a>
-	<a href="#" onClick={this.halve}>halve</a>
-	<a href="#" onClick={this.times2}>*2</a>
       </table>
       <a href="#" onClick={this.addValue}>add</a>
       </div>
@@ -357,7 +363,7 @@ var Sync = React.createClass({
       var output = event.outputBuffer.getChannelData(0);
 
       for (var i = 0; i < BS; i++) {
-	var samplesPerCycle = ctx.sampleRate / frequency[i];
+	var samplesPerCycle = ctx.sampleRate * frequency[i];
 	output[i] = 0;
 	if (i >= lastTick + samplesPerCycle) {
 	  lastTick = i;
@@ -389,9 +395,9 @@ var Sync = React.createClass({
     return (
       <div className='node'>
 	Sync
-	<Attributes attributeList={['frequency']}
+	<Attributes attributeList={['seconds']}
 		    attributeMap={{
-			frequency: this.state.node
+			seconds: this.state.node
 		      }}
 		    scope={this.props.scope}
 		    attributes={this.props.attributes}
@@ -432,6 +438,7 @@ var Array = React.createClass({
 	  idx: idx
 	});
       }
+      this.state.idx = idx;
       this.state.lastChange = lastChange;
       
       this.state.lastChange -= BS;
@@ -620,7 +627,7 @@ var Scope = React.createClass({
 	newNode = {
 	  tagName: Sync,
 	  attributes: {
-	    frequency: { tagName: Value, value: 0 }
+	    seconds: { tagName: Value, value: 0 }
 	  }
 	};
       var r = Math.random();
