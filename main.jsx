@@ -133,10 +133,11 @@ var Attribute = React.createClass({
     this.setState({
       dragOver: 0
     });
-    if (event.handled) return;
-    event.handled = true;
-
+    
+    if (!this.props.scope.state.dragging) return;
     this.props.scope.handleMove(this.props.scope.state.dragging, this.props.path);
+    this.props.scope.state.dragging = false;
+    
     event.preventDefault();
   },
   handleDragEnter: function (event) {
@@ -162,7 +163,7 @@ var Attribute = React.createClass({
     return (
       <div className={`attr ${this.state.dragOver ? 'dragOver' : ''}`} onDrop={this.handleDrop} onDragEnter={this.handleDragEnter} onDragExit={this.handleDragExit} onDragOver={this.handleDragOver} onDragLeave={this.handleDragExit}>
 	<div>{this.props.name}:</div>
-	<Draggable path={this.props.path}>
+	<Draggable path={this.props.path} scope={this.props.scope}>
 	    {
 	      React.createElement(this.props.value.tagName, {
 		to: this.props.to, scope: this.props.scope, path: this.props.path, ...this.props.value
@@ -186,6 +187,7 @@ var Attributes = React.createClass({
 var Draggable = React.createClass({
   handleDragStart: function (event) {
     this.props.scope.state.dragging = this.props.path;
+    event.stopPropagation();
   },
   handleDrag: function (event) {
   },
@@ -316,6 +318,7 @@ var Array = React.createClass({
   },
   connect: function (to) {
     if (!to) return;
+    if (to == ctx.destination) return;
     this.state.gain.connect(to);
   },
   disconnect: function () {
@@ -494,10 +497,11 @@ var Scope = React.createClass({
     this.setState(Delete(this.state, path));
   },
   handleMove: function (from, to) {
+    console.log(from, to);
     this.setState(Change(
       Change(this.state, to, Get(this.state, from)),
       from,
-      { tagName: Value, value: 0 }
+      from.length == 2 ? undefined : { tagName: Value, value: 0 }
     ));
   },
   renderVariables: function (vars) {
@@ -565,6 +569,7 @@ var blankData = {
 };
 
 function Change(original, path, value) {
+  if (!value) return Delete(original, path);
   if (path.length == 0) return value;
   original[path[0]] = Change(original[path[0]], path.slice(1), value);
   return original;
