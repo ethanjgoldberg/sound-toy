@@ -1,11 +1,8 @@
 var ctx = new AudioContext();
 
-console.log(window.location);
 var BS = window.location.search
        ? (Math.pow(2, parseInt(window.location.search.slice(1)))*256)
   : 256 * 4;
-
-console.log(BS);
 
 var ONES = ctx.createScriptProcessor(BS, 0, 1);
 var outputBuffer = new Float32Array(BS);
@@ -52,20 +49,20 @@ var Variable = React.createClass({
       return;
     this.props.scope.state.throughs[this.props.name].connect(to);
   },
-  disconnect: function () {
+  disconnect: function (to) {
     if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
       return;
-    this.props.scope.state.throughs[this.props.name].disconnect();
+    this.props.scope.state.throughs[this.props.name].disconnect(to);
   },
   componentDidMount: function () {
     this.connect(this.props.to);
   },
   componentWillUnmount: function () {
-    this.disconnect();
+    this.disconnect(this.props.to);
   },
   componentWillUpdate: function (nextProps) {
     if (nextProps.name == this.props.name) return;
-    this.disconnect();
+    this.disconnect(this.props.to);
   },
   componentDidUpdate: function (prevProps) {
     if (prevProps.name == this.props.name) return;
@@ -151,6 +148,9 @@ var Sequence = React.createClass({
   halve: function () {
     this.props.scope.handleChange(this.props.path.concat(['steps', 'length']), Math.floor(this.props.steps.length / 2));
   },
+  plus1: function () {
+    this.props.scope.handleChange(this.props.path.concat(['steps']), this.props.steps.concat([0]));
+  },
   times2: function () {
     var newSteps = [];
     for (var i = 0; i < this.props.steps.length; i++) {
@@ -180,6 +180,7 @@ var Sequence = React.createClass({
       <a href="#" onClick={this.dupe}>dupe</a>
       <a href="#" onClick={this.halve}>halve</a>
       <a href="#" onClick={this.times2}>*2</a>
+      <a href="#" onClick={this.plus1}>+1</a>
       <table style={{width: 200}}>
 	<tbody>
 	  {
@@ -288,6 +289,51 @@ var Draggable = React.createClass({
   }
 });
 
+var Delay = React.createClass({
+  getInitialState: function () {
+    var delay = ctx.createDelay(4);
+    delay.delayTime.value = 0;
+    var feedback = ctx.createGain();
+    feedback.gain.value = 0;
+    
+    delay.connect(feedback);
+    feedback.connect(delay);
+    
+    return {
+      delay: delay,
+      feedback: feedback
+    };
+  },
+  connect: function (to) {
+    if (!to) return;
+    this.state.delay.connect(to);
+  },
+  disconnect: function (to) {
+    this.state.delay.disconnect(to);
+  },
+  componentDidMount: function () {
+    this.connect(this.props.to);
+  },
+  componentWillUnmount: function () {
+    this.disconnect(this.props.to);
+  },
+  render: function () {
+    return (
+      <div className="node">
+	<Attributes attributeList={['source', 'delay', 'feedback']}
+		    attributeMap={{
+			source: this.state.delay,
+			delay: this.state.delay.delayTime,
+			feedback: this.state.feedback.gain
+		      }}
+		    scope={this.props.scope}
+		    attributes={this.props.attributes}
+		    path={this.props.path} />
+      </div>
+    );
+  }
+});
+    
 var Osc = React.createClass({
   getInitialState: function () {
     var osc = ctx.createOscillator();
@@ -327,12 +373,6 @@ var Osc = React.createClass({
   componentDidMount: function () {
     this.connect(this.props.to);
   },
-  save: function () {
-    return {
-      tagName: Osc,
-      attributes: this.state.attributes
-    };
-  },
   render: function () {
     var types = ['sine', 'triangle', 'sawtooth', 'square'];
     return (
@@ -350,30 +390,33 @@ var Osc = React.createClass({
 			offset: this.state.offset
 		      }}
 		    scope={this.props.scope}
-		    attributes={this.state.attributes}
+		    attributes={this.props.attributes}
 		    path={this.props.path} />
       </div>
     );
   }
 });
 
-var Sync = React.createClass({
+var Index = React.createClass({
   getInitialState: function () {
     var node = ctx.createScriptProcessor(BS, 1, 1);
     node.onaudioprocess = function (event) {
       var lastTick = this.state.lastTick || 0;
+      var out = this.state.out || 0;
       var frequency = event.inputBuffer.getChannelData(0);
       var output = event.outputBuffer.getChannelData(0);
-
+      
+      var samplesPerCycle = ctx.sampleRate * frequency[0];
       for (var i = 0; i < BS; i++) {
-	var samplesPerCycle = ctx.sampleRate * frequency[i];
-	output[i] = 0;
+	output[i] = out;
 	if (i >= lastTick + samplesPerCycle) {
 	  lastTick = i;
-	  output[i] = 1;
+	  out++;
+	  if (out >= this.props.max) out -= this.props.max;
 	}
       }
       this.state.lastTick = lastTick - BS;
+      this.state.out = out;
     }.bind(this);
 
     return {
@@ -394,13 +437,17 @@ var Sync = React.createClass({
   componentWillUnmount: function () {
     this.disconnect();
   },
+  handleMaxChange: function (event) {
+    this.props.scope.handleChange(this.props.path.concat(['max']), event.target.value);
+  },
   render: function () {
     return (
       <div className='node'>
-	Sync
+	Index
+	<input type="number" onChange={this.handleMaxChange} value={this.props.max} />
 	<Attributes attributeList={['seconds']}
 		    attributeMap={{
-			seconds: this.state.node
+			seconds: this.state.node,
 		      }}
 		    scope={this.props.scope}
 		    attributes={this.props.attributes}
@@ -414,25 +461,20 @@ var Array = React.createClass({
   getInitialState: function () {
     var node = ctx.createScriptProcessor(BS, 1, 1);
     node.onaudioprocess = function (event) {
-      var idx = this.state.idx || 0;
-
-      var sync = event.inputBuffer.getChannelData(0);
+      var index = event.inputBuffer.getChannelData(0);
       var output = event.outputBuffer.getChannelData(0);
 
       for (var i = 0; i < BS; i++) {
-	if (sync[i]) {
-	  idx++;
-	  if (this.props.steps.length == 0) idx = 0;
-	  else idx = idx % this.props.steps.length;
+	var idx = Math.floor(index[0] / this.props.ticks) % this.props.steps.length;
+	output[i] = this.props.values[this.props.steps[idx]] || 0;
+      }
+      setTimeout(function () {
+	if (idx != this.state.idx) {
+	  this.setState({
+	    idx: idx
+	  });
 	}
-	output[i] = this.props.values[this.props.steps[idx]] || 0
-      }
-      if (idx != this.state.idx) {
-	this.setState({
-	  idx: idx
-	});
-      }
-      this.state.idx = idx;
+      }.bind(this), 0);
     }.bind(this);
     
     var gain = ctx.createGain();
@@ -461,17 +503,21 @@ var Array = React.createClass({
   componentWillUnmount: function () {
     this.disconnect();
   },
+  handleTicksChange: function (event) {
+    this.props.scope.handleChange(this.props.path.concat(['ticks']), event.target.value);
+  },
   render: function () {
     return (
       <div className='node'>
+	<input value={this.props.ticks} onChange={this.handleTicksChange} type="number" />
       <Sequence values={this.props.values} steps={this.props.steps} onChange={this.handleValuesChange} scope={this.props.scope} path={this.props.path} index={this.state.idx} />
-      <Attributes attributeList={['base', 'sync']}
+      <Attributes attributeList={['base', 'index']}
 		  attributeMap={{
 		      base: this.state.gain.gain,
-		      sync: this.state.node
+		      index: this.state.node
 		    }}
 		  scope={this.props.scope}
-		  attributes={this.state.attributes}
+		  attributes={this.props.attributes}
 		  path={this.props.path} />
       </div>
     );
@@ -584,10 +630,12 @@ var Scope = React.createClass({
 	  tagName: Array,
 	  values: [1, 1.5, 1.6],
 	  steps: [0, 0, 2, 1],
+	  ticks: 1,
 	  attributes: {
 	    base: { tagName: Value, value: 110 },
-	    sync: {
-	      tagName: Sync,
+	    index: {
+	      tagName: Index,
+	      max: 4,
 	      attributes: {
 		seconds: {
 		  tagName: Value,
@@ -611,13 +659,24 @@ var Scope = React.createClass({
 	  name: Object.keys(this.state.variables)[0],
 	  attributes: {}
 	};
-      if (thing == 'sync')
+      if (thing == 'index')
 	newNode = {
-	  tagName: Sync,
+	  tagName: Index,
+	  max: 4,
 	  attributes: {
-	    seconds: { tagName: Value, value: 0 }
+	    seconds: { tagName: Value, value: 1 }
 	  }
 	};
+      if (thing == 'delay')
+	newNode = {
+	  tagName: Delay,
+	  attributes: {
+	    source: { tagName: Value, value: 0 },
+	    delay: { tagName: Value, value: 1 },
+	    feedback: { tagName: Value, value: 0 }
+	  }
+	};
+      
       var r = Math.random();
       var dest = this.state.destination;
       dest[r] = newNode;
@@ -687,7 +746,8 @@ var Scope = React.createClass({
 	    <a href="#" onClick={this.handleAddClick('array')}>array</a>
 	    <a href="#" onClick={this.handleAddClick('expression')}>expression</a>
 	    <a href="#" onClick={this.handleAddClick('variable')}>get var</a>
-	    <a href="#" onClick={this.handleAddClick('sync')}>sync</a>
+	    <a href="#" onClick={this.handleAddClick('index')}>index</a>
+	    <a href="#" onClick={this.handleAddClick('delay')}>delay</a>
 	  </div>
 	</div>
 	{this.renderVariables(this.state.variables)}

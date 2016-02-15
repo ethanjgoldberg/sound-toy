@@ -2,9 +2,9 @@
 - [X] variables
   - [X] getvar
   - [X] setvar
-- [ ] effects
+- [-] effects
   - [ ] reverb
-  - [ ] delay
+  - [X] delay
   - [ ] filter
 - [-] more complex oscillator
   - [X] types (saw, sqr, etc.)
