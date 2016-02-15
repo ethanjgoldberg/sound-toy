@@ -1,3 +1,15 @@
+a {
+    margin: 3px;
+}
+
+.dragOver {
+    background: #afa !important;
+}
+
+.draggable {
+    cursor: move;
+}
+
 .note {
     position: relative;
     background: #c00;

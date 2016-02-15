@@ -6,9 +6,9 @@
   - [ ] reverb
   - [ ] delay
   - [ ] filter
-- [ ] more complex oscillator
-  - [ ] types (saw, sqr, etc.)
-    - [ ] non-numeric values (drop down menu, in particular)
+- [-] more complex oscillator
+  - [X] types (saw, sqr, etc.)
+    - [X] non-numeric values (drop down menu, in particular)
   - [ ] wave table?
 - [ ] samples
 - [ ] array values
@@ -21,8 +21,10 @@
 - [X] arithmetic node
 - [X] random values
 - [ ] encapsulation
-- [ ] save/load
-- [ ] share on the network
-
+- [-] save/load
+  - [X] serialization
+  - [ ] write out, read in
+- [ ] share on the 
 * gui editor 
 it's not so bad right now to edit the xml directly, but a gui editor is of course the goal.
+- [X] done!
