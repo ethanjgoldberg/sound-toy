@@ -8,12 +8,11 @@ a {
 
 .draggable {
     cursor: move;
+    border: 3px solid transparent;
 }
 
-.note {
-    position: relative;
-    background: #c00;
-    height: 4px;
+.draggable:hover {
+    border: 3px solid #aaf;
 }
 
 .right {
@@ -30,6 +29,10 @@ a {
     margin: 4px;
     background: white;
     min-width: 200px;
+    display: inline-block;
+}
+
+.draggable {
     display: inline-block;
 }
 

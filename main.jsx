@@ -33,17 +33,10 @@ var SetVariable = React.createClass({
   render: function () {
     if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
       this.props.scope.state.throughs[this.props.name] = ctx.createGain();
-    return (
-      <div className="node">
-      <span className='var'>{this.props.name}</span>
-      {
-	React.cloneElement(this.props.value, {
-	  to: this.props.scope.state.throughs[this.props.name],
-	  scope: this.props.scope
-	})
-      }
-      </div>
-    );
+    return React.createElement(Attribute, {
+      to: this.props.scope.state.throughs[this.props.name],
+      ...this.props
+    });
   }
 });
 
@@ -54,9 +47,23 @@ var Variable = React.createClass({
       this.props.scope.state.throughs[this.props.name] = ctx.createGain();
     this.props.scope.state.throughs[this.props.name].connect(to);
   },
+  handleNameChange: function (event) {
+    console.log(event.target.value);
+    this.props.scope.handleChange(this.props.path.concat(['name']), event.target.value);
+  },
   render: function () {
     this.connect(this.props.to);
-    return <span className='var'>{this.props.name}</span>
+    return (
+      <div className="node">
+      <select value={this.props.name} onChange={this.handleNameChange}>
+      {
+	Object.keys(this.props.scope.state.variables).map(function (v) {
+	  return <option value={v} key={v}>{v}</option>
+	})
+      }
+      </select>
+      </div>
+    );
   }
 });
 
@@ -129,8 +136,7 @@ var Attribute = React.createClass({
     if (event.handled) return;
     event.handled = true;
 
-    this.props.scope.handleMove(event.dragging, this.props.path);
-    event.dragging = false;
+    this.props.scope.handleMove(this.props.scope.state.dragging, this.props.path);
     event.preventDefault();
   },
   handleDragEnter: function (event) {
@@ -146,19 +152,22 @@ var Attribute = React.createClass({
 //    event.stopPropagation();
   },
   handleDragOver: function (event) {
+    if (subpathOf(this.props.path, this.props.scope.state.dragging)) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
   },
   render: function () {
     return (
       <div className={`attr ${this.state.dragOver ? 'dragOver' : ''}`} onDrop={this.handleDrop} onDragEnter={this.handleDragEnter} onDragExit={this.handleDragExit} onDragOver={this.handleDragOver} onDragLeave={this.handleDragExit}>
-	{this.props.name}:
+	<div>{this.props.name}:</div>
 	<Draggable path={this.props.path}>
-	{
-	  React.createElement(this.props.value.tagName, {
-	    to: this.props.to, scope: this.props.scope, path: this.props.path, ...this.props.value
-	  })
-	}
+	    {
+	      React.createElement(this.props.value.tagName, {
+		to: this.props.to, scope: this.props.scope, path: this.props.path, ...this.props.value
+	      })
+	    }
 	</Draggable>
       </div>
     );
@@ -175,16 +184,20 @@ var Attributes = React.createClass({
 });
 
 var Draggable = React.createClass({
+  handleDragStart: function (event) {
+    this.props.scope.state.dragging = this.props.path;
+  },
   handleDrag: function (event) {
-    event.handled = false;
-    if (!event.dragging) {
-      event.dragging = this.props.path;
-    }
+  },
+  handleDragEnd: function () {
+    this.props.scope.state.dragging = false;
   },
   render: function () {
     return (
       <div className='draggable'
 	   onDrag={this.handleDrag}
+	   onDragStart={this.handleDragStart}
+	   onDragEnd={this.handleDragEnd}
 	   draggable={true}>
 	{this.props.children}
       </div>
@@ -411,10 +424,17 @@ var Scope = React.createClass({
   getInitialState: function () {
     return {
       throughs: {},
-      destination: this.props.destination
+      destination: this.props.destination,
+      variables: this.props.variables,
+      dragging: false,
+      newVariableName: ''
     };
   },
-
+  handleNameChange: function (event) {
+    this.setState({
+      newVariableName: event.target.value
+    });
+  },
   handleAddClick: function (thing) {
     return function () {
       var newNode;
@@ -445,6 +465,12 @@ var Scope = React.createClass({
 	    x: { tagName: Value, value: 0 }
 	  }
 	};
+      if (thing == 'variable')
+	newNode = {
+	  tagName: Variable,
+	  name: Object.keys(this.state.variables)[0],
+	  attributes: {}
+	};
       var r = Math.random();
       var dest = this.state.destination;
       dest[r] = newNode;
@@ -453,8 +479,15 @@ var Scope = React.createClass({
       });
     }.bind(this);
   },
+  handleAddVariable: function () {
+    var vars = this.state.variables;
+    vars[this.state.newVariableName] = { tagName: Value, value: 0 };
+    this.setState({
+      variables: vars,
+      newVariableName: ''
+    });
+  },
   handleChange: function (path, value) {
-    console.log(path, value);
     this.setState(Change(this.state, path, value));
   },
   handleDelete: function (path) {
@@ -470,7 +503,7 @@ var Scope = React.createClass({
   renderVariables: function (vars) {
     var ret = [];
     for (var k in vars) {
-      ret.push(<SetVariable key={k} name={k} value={vars[k]} scope={this} />);
+      ret.push(<SetVariable key={k} name={k} value={vars[k]} scope={this} path={['variables', k]} />);
     }
     return ret;
   },
@@ -480,7 +513,7 @@ var Scope = React.createClass({
     var ret = [];
     for (var k in dest) {
       ret.push(
-	<Draggable name={k} key={k} data={dest[k]} path={['destination', k]}>
+	<Draggable name={k} key={k} data={dest[k]} path={['destination', k]} scope={this}>
 	  {
 	    React.createElement(dest[k].tagName, {
 	      path: ['destination', k],
@@ -498,11 +531,18 @@ var Scope = React.createClass({
     return (
       <div>
 	<div>Add:
-	  <a href="#" onClick={this.handleAddClick('oscillator')}>oscillator</a>
-	  <a href="#" onClick={this.handleAddClick('array')}>array</a>
-	  <a href="#" onClick={this.handleAddClick('expression')}>expression</a>
+	  <div>
+	    <input type="text" value={this.state.newVariableName} onChange={this.handleNameChange} placeholder="name" />
+	    <a href="#" onClick={this.handleAddVariable}>new var</a>
+	  </div>
+	  <div>
+	    <a href="#" onClick={this.handleAddClick('oscillator')}>oscillator</a>
+	    <a href="#" onClick={this.handleAddClick('array')}>array</a>
+	    <a href="#" onClick={this.handleAddClick('expression')}>expression</a>
+	    <a href="#" onClick={this.handleAddClick('variable')}>get var</a>
+	  </div>
 	</div>
-	{this.renderVariables(this.props.variables)}
+	{this.renderVariables(this.state.variables)}
 	{this.renderDestination(this.state.destination)}
       </div>
     );
@@ -543,6 +583,15 @@ function Delete(original, path) {
 function Get(original, path) {
   if (path.length == 0) return original;
   return Get(original[path[0]], path.slice(1));
+};
+
+function subpathOf(a, b) {
+  // returns true if a is a subpath of b
+  if (a.length == 0)
+    return b.length == 0;
+  if (b.length == 0) return true
+  if (b[0] != a[0]) return false;
+  return subpathOf(a.slice(1), b.slice(1));
 };
 
 var blank = (
