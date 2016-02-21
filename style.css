@@ -1,0 +1,86 @@
+.val {
+    width: 4em;
+}
+
+.step {
+    height: 1em;
+    cursor: pointer;
+    border: 1px solid #eee;
+    display: inline-block;
+    position: relative;
+    top: .2em;
+}
+.step.on {
+    background: #aaa;
+}
+.step.highlight {
+    border-left: 1px solid red;
+    border-right: 1px solid red;
+}
+tr:first-child > .step.highlight {
+    border-top: 1px solid red;
+}
+tr:last-child > .step.highlight {
+    border-bottom: 1px solid red;
+}
+
+a {
+    margin: 3px;
+}
+
+.dragOver {
+    background: #afa !important;
+}
+
+.draggable {
+    cursor: move;
+    border: 3px solid transparent;
+}
+
+.draggable:hover {
+    border: 3px solid #aaf;
+}
+
+.right {
+    float: right;
+    font-weight: bold;
+}
+
+.var {
+    font-weight: bold;
+}
+
+.node {
+    border: 1px solid black;
+    margin: 4px;
+    background: white;
+    min-width: 200px;
+    display: inline-block;
+}
+
+.draggable {
+    display: inline-block;
+}
+
+.attr {
+    margin: 4px;
+    margin-top: 16px;
+    margin-left: 16px;
+    border-top: 1px solid grey;
+    border-bottom: 1px solid grey;
+}
+
+.attr:nth-child(even) {
+    background: #eee;
+}
+
+.attr:nth-child(odd) {
+    background: #ddd;
+}
+    
+
+#field {
+    height: 400px;
+    width: 400px;
+    border: 1px solid black;
+}
