@@ -21,7 +21,7 @@
       in order to do this, we'll need some notion of an instrument -- a factory for creating synth + envelope pairs.
 - [X] arithmetic node
 - [X] random values
-- [ ] encapsulation
+- [X] encapsulation
 - [-] save/load
   - [X] serialization
   - [ ] write out, read in
@@ -29,3 +29,6 @@
 * gui editor 
 it's not so bad right now to edit the xml directly, but a gui editor is of course the goal.
 - [X] done!
+- [ ] nice gui tools
+  - [ ] sliders
+  - [ ] knobs

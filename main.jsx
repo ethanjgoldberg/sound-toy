@@ -43,24 +43,73 @@ var SetVariable = React.createClass({
 });
 
 var Variable = React.createClass({
+  getInitialState: function () {
+    var attrsToPaths = this.props.scope.getAttributeMap(this.props.name);
+    var throughs = {};
+    var hasAttrs = false;
+    var attributes = Store.get(this.props.path.concat(['attributes']));
+    for (var k in attrsToPaths) {
+      hasAttrs = true;
+      if (!attributes.hasOwnProperty(k))
+	attributes[k] = { tagName: Value, value: 0 };
+      throughs[k] = ctx.createGain();
+      attrsToPaths[k] = attrsToPaths[k].map(function (p) {
+	return this.props.path.concat(['element']).concat(p);
+      }.bind(this));
+    }
+
+    var node;
+    if (hasAttrs) {
+      node = ctx.createGain();
+    } else {
+      node = this.props.scope.state.throughs[this.props.name];
+    }
+    
+    return {
+      attrsToPaths: attrsToPaths,
+      attributes: attributes,
+      throughs: throughs,
+      node: node
+    };
+  },
   connect: function (to) {
     if (!to) return;
-    if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
-      return;
-    this.props.scope.state.throughs[this.props.name].connect(to);
+    if (!this.state.node) return;
+    this.state.node.connect(to);
   },
   disconnect: function (to) {
-    if (!this.props.scope.state.throughs.hasOwnProperty(this.props.name))
+    if (!this.state.node) return;
+    this.state.node.disconnect(to);
+  },
+  handleDataChange: function (path, value) {
+    if (subpathOf(path, this.props.path)) {
+      let p = path.slice(this.props.path.length);
+      if (p.length == 0 || p[0] == 'name')
+	this.forceUpdate();
       return;
-    this.props.scope.state.throughs[this.props.name].disconnect(to);
+    }
+
+    if (subpathOf(path, ['variables', this.props.name])) {
+      Store.set(this.props.path.concat(['element']),
+		copy(Store.get(['variables', this.props.name])));
+    }
+  },
+  componentWillMount: function () {
+    Store.set(this.props.path.concat(['attributes']), this.state.attributes);
+    
+    var val = Store.get(['variables', this.props.name]);
+    var v = copy(val);
+    Store.set(this.props.path.concat(['element']), v);
   },
   componentDidMount: function () {
+    Store.on('CHANGED', this.handleDataChange);
     this.connect(this.props.to);
   },
   componentWillUnmount: function () {
+    Store.off('CHANGED', this.handleDataChange);
     this.disconnect(this.props.to);
   },
-  componentWillUpdate: function (nextProps) {
+  componentWillUpdate: function (nextProps) {   
     if (nextProps.name == this.props.name) return;
     this.disconnect(this.props.to);
   },
@@ -69,18 +118,56 @@ var Variable = React.createClass({
     this.connect(this.props.to);
   },
   handleNameChange: function (event) {
-    this.props.scope.handleChange(this.props.path.concat(['name']), event.target.value);
+    Store.set(this.props.path.concat(['name']), event.target.value);
   },
+  renderAttributes: function () {
+    if (Object.keys(this.state.attributes).length == 0) return;
+    var v = Store.get(this.props.path.concat(['element']));
+    var args = this.props.args || {};
+    for (var k in this.state.throughs) {
+      args[k] = this.state.throughs[k];
+    }
+    return (
+      <div>
+	<div style={{display: 'none'}}>
+	  {
+	    React.createElement(v.tagName, {
+	      to: this.state.node, scope: this.props.scope,
+	      path: this.props.path.concat(['element']),
+	      args: args,
+	      ...v
+	    })
+	  }
+	</div>
+	{
+	  Object.keys(this.state.attrsToPaths).map(function (name) {
+	    return (
+	      <Attribute key={name} name={name}
+			 value={this.state.attributes[name]}
+			 scope={this.props.scope}
+			 to={this.state.throughs[name]}
+			 onChange={this.props.onChange}
+			 path={this.props.path.concat(['attributes', name])}
+			 paths={this.state.attrsToPaths[name]} />
+	      );
+	  }.bind(this))
+	}
+      </div>
+    );
+  },
+
   render: function () {
+    let name = Store.get(this.props.path.concat(['name']));
     return (
       <div className="node" key={name}>
-      <select value={this.props.name} onChange={this.handleNameChange}>
-      {
-	Object.keys(this.props.scope.state.variables).map(function (v) {
-	  return <option value={v} key={v}>{v}</option>
-	})
-      }
-      </select>
+	<select value={name} onChange={this.handleNameChange}>
+	  {
+	    Object.keys(Store.get(['variables'])).map(function (v) {
+	      return <option value={v} key={v}>{v}</option>
+	    })
+	  }
+	</select>
+	{ this.renderAttributes() }
       </div>
     );
   }
@@ -98,106 +185,165 @@ var Expression = React.createClass({
   render: function () {
     return (<input type="text" value={this.props.value} onChange={this.handleChange} />);
   }
-});    
+});
 
 var Value = React.createClass({
   getInitialState: function () {
-    var node = AP(this.props.value);
+    var node = AP(parseFloat(this.props.value) || 0);
     return {
-      value: this.props.value,
       node: node
     };
   },
   connect: function (to) {
     if (!to) return;
+    let v = this.getValue();
+    if (v.toString().startsWith('~')) {
+      if (!this.props.args || !this.props.args[v]) return;
+      this.props.args[v].connect(to);
+      return;
+    }
     this.state.node.connect(to);
   },
   disconnect: function () {
     this.state.node.disconnect();
+    try {
+      let v = this.getValue();
+      if (v.toString().startsWith('~')) {
+	if (!this.props.args || !this.props.args[v]) return;
+	this.props.args[v].disconnect();
+	return;
+      }
+    } catch (e) {}
+  },
+  handleDataChange: function (path, value) {
+    if (!subpathOf(path, this.props.path)) return;
+
+    var p = path.slice(this.props.path.length);
+
+    if (p.length == 1 && p[0] == 'value') {
+      this.state.node.value = parseFloat(value) || 0;
+      this.forceUpdate();
+    }
+  },
+  componentDidMount: function () {
+    Store.on('CHANGED', this.handleDataChange);
+    this.connect(this.props.to);
   },
   componentWillUnmount: function () {
+    Store.off('CHANGED', this.handleDataChange);
     this.disconnect();
   },
   handleChange: function (event) {
-    this.state.node.value = event.target.value;
-    this.props.scope.handleChange(this.props.path.concat(['value']), event.target.value);
-    this.setState({
-      value: event.target.value
-    });
+    Store.set(this.props.path.concat(['value']), event.target.value);
+    if (this.props.paths) {
+      for (var i = 0; i < this.props.paths.length; i++) {
+	Store.set(this.props.paths[i].concat(['value']), event.target.value);
+      }
+    }
+  },
+  getValue: function () {
+    return Store.get(this.props.path.concat(['value']));
   },
   render: function () {
-    this.connect(this.props.to);
-    return (<input type="number" value={this.state.value} onChange={this.handleChange} />);
+    return (<input value={this.getValue()} onChange={this.handleChange} />);
   }
 });
 
 var Sequence = React.createClass({
+  componentDidMount: function () {
+    Store.on('CHANGED', this.handleDataChange);
+  },
+  componentWillUnmount: function () {
+    Store.off('CHANGED', this.handleDataChange);
+  },
+  handleDataChange: function (path, value) {
+    if (!subpathOf(path, this.props.path)) return;
+    let p = path.slice(this.props.path.length);
+    if (p[0] == 'values' || p[0] == 'steps' || p[0] == 'ticks')
+      this.forceUpdate();
+  },
   handleValueChange: function (i) {
     return function (event) {
-      this.props.scope.handleChange(this.props.path.concat(['values', i]), event.target.value);
+      Store.set(this.props.path.concat(['values', i]), event.target.value);
     }.bind(this)
   },
   handleClick: function (i, j) {
     return function () {
-      this.props.scope.handleChange(this.props.path.concat(['steps', j]), i);
+      Store.set(this.props.path.concat(['steps', j]), i);
     }.bind(this);
   },
   dupe: function () {
-    this.props.scope.handleChange(this.props.path.concat(['steps']), this.props.steps.concat(this.props.steps));
+    let steps = Store.get(this.props.path.concat(['steps']));
+    Store.set(this.props.path.concat(['steps']), steps.concat(steps));
   },
   halve: function () {
-    this.props.scope.handleChange(this.props.path.concat(['steps', 'length']), Math.floor(this.props.steps.length / 2));
+    let steps = Store.get(this.props.path.concat(['steps']));
+    Store.set(this.props.path.concat(['steps', 'length']), Math.floor(steps.length / 2));
   },
   plus1: function () {
-    this.props.scope.handleChange(this.props.path.concat(['steps']), this.props.steps.concat([0]));
+    let steps = Store.get(this.props.path.concat(['steps']));
+    Store.set(this.props.path.concat(['steps']), steps.concat([0]));
+  },
+  minus1: function () {
+    let steps = Store.get(this.props.path.concat(['steps']));
+    Store.set(this.props.path.concat(['steps', 'length']), steps.length - 1);
   },
   times2: function () {
+    let steps = Store.get(this.props.path.concat(['steps']));
     var newSteps = [];
-    for (var i = 0; i < this.props.steps.length; i++) {
-      newSteps.push(this.props.steps[i]);
-      newSteps.push(this.props.steps[i]);
+    for (var i = 0; i < steps.length; i++) {
+      newSteps.push(steps[i], steps[i]);
     }
-    this.props.scope.handleChange(this.props.path.concat(['steps']), newSteps);
+    Store.set(this.props.path.concat(['steps']), newSteps);
+  },
+  div2: function () {
+    let steps = Store.get(this.props.path.concat(['steps']));
+    var newSteps = [];
+    for (var i = 0; i < steps.length; i+=2) {
+      newSteps.push(steps[i]);
+    }
+    Store.set(this.props.path.concat(['steps']), newSteps);
   },
   addValue: function () {
-    this.props.scope.handleChange(this.props.path.concat(['values']), this.props.values.concat([0]));
+    Store.set(this.props.path.concat(['values']), this.props.values.concat([0]));
   },
   render: function () {
+    let steps = Store.get(this.props.path.concat(['steps']));
+    let values = Store.get(this.props.path.concat(['values']));
     var rows = {};
-    for (var i = 0; i < this.props.values.length; i++) {
+    for (var i = 0; i < values.length; i++) {
       var row = [];
-      for (var j = 0; j < this.props.steps.length; j++) {
+      for (var j = 0; j < steps.length; j++) {
 	row.push(<td key={j}
-		     className={'step ' + (this.props.steps[j] == i ? 'on' : 'off') + (this.props.index == j ? ' highlight' : '')}
-		     style={{width: (100 / this.props.steps.length) + '%' }}
+		     className={'step ' + (steps[j] == i ? 'on' : 'off') + (this.props.index == j ? ' highlight' : '')}
+		     style={{width: (100 / steps.length) + '%' }}
 		     onClick={this.handleClick(i, j)} />);
       }
-      rows[this.props.values[i]] = row;
+      rows[values[i]] = row;
     }
 
+    var valuesArray = [];
+    for (var i = 0; i < values.length; i++) {
+      valuesArray.push(
+	<tr key={i}>
+	  <td>
+	    <input className="val" type="text" value={values[i]}
+		   onChange={this.handleValueChange(i)} />
+	  </td>
+	  {rows[values[i]]}
+	</tr>
+      );
+    }
     return (
       <div>
       <a href="#" onClick={this.dupe}>dupe</a>
       <a href="#" onClick={this.halve}>halve</a>
       <a href="#" onClick={this.times2}>*2</a>
+      <a href="#" onClick={this.div2}>/2</a>
       <a href="#" onClick={this.plus1}>+1</a>
+      <a href="#" onClick={this.minus1}>-1</a>
       <table style={{width: 200}}>
-	<tbody>
-	  {
-	    this.props.values.map(function (v, i) {
-	      return (
-		<tr key={i}>
-		  <td>
-		    <input className="val" type="text" value={v} onChange={this.handleValueChange(i)} />
-		  </td>
-		  {
-		    rows[v]
-		  }
-		</tr>
-	      );
-	    }.bind(this))
-	  }
-      	</tbody>
+	<tbody>{valuesArray}</tbody>
       </table>
       <a href="#" onClick={this.addValue}>add</a>
       </div>
@@ -211,13 +357,40 @@ var Attribute = React.createClass({
       dragOver: 0
     };
   },
+  handleDataChange: function (path, value) {
+    if (subpathOf(path, this.props.path)) {
+      if (path.length == this.props.path.length) {
+	this.forceUpdate();
+      }
+    }
+  },
+  componentDidMount: function () {
+    Store.on('CHANGED', this.handleDataChange);
+  },
+  componentWillUnmount: function () {
+    Store.off('CHANGED', this.handleDataChange);
+  },
   handleDrop: function (event) {
     this.setState({
       dragOver: 0
     });
     
     if (!this.props.scope.state.dragging) return;
-    this.props.scope.handleMove(this.props.scope.state.dragging, this.props.path);
+
+    Store.set(this.props.path, copy(Store.get(this.props.scope.state.dragging)));
+    if (this.props.paths) {
+      for (var i = 0; i < this.props.paths.length; i++) {
+	var p = this.props.paths[i];
+	Store.set(p, copy(this.props.scope.state.dragging));
+      }
+    }
+    if (subpathOf(this.props.scope.state.dragging, ['variables']) ||
+	this.props.scope.state.dragging.length > 2) {
+	  Store.set(this.props.scope.state.dragging, { tagName: Value, value: 0 });
+    } else {
+      Store.delete(this.props.scope.state.dragging);
+    }
+
     this.props.scope.state.dragging = false;
     
     event.preventDefault();
@@ -241,14 +414,22 @@ var Attribute = React.createClass({
     event.preventDefault();
     event.stopPropagation();
   },
+  getValue: function () {
+    return Store.get(this.props.path);
+  },
   render: function () {
+    let v = this.getValue();
     return (
-      <div className={`attr ${this.state.dragOver ? 'dragOver' : ''}`} onDrop={this.handleDrop} onDragEnter={this.handleDragEnter} onDragExit={this.handleDragExit} onDragOver={this.handleDragOver} onDragLeave={this.handleDragExit}>
+      <div className={`attr ${this.state.dragOver ? 'dragOver' : ''}`}
+	   onDrop={this.handleDrop} onDragEnter={this.handleDragEnter}
+	   onDragExit={this.handleDragExit} onDragOver={this.handleDragOver}
+	   onDragLeave={this.handleDragExit}>
 	<div>{this.props.name}:</div>
 	<Draggable path={this.props.path} scope={this.props.scope}>
 	    {
-	      React.createElement(this.props.value.tagName, {
-		to: this.props.to, scope: this.props.scope, path: this.props.path, ...this.props.value
+	      React.createElement(v.tagName, {
+		to: this.props.to, scope: this.props.scope, path: this.props.path,
+		args: this.props.args, paths: this.props.paths, ...v
 	      })
 	    }
 	</Draggable>
@@ -259,7 +440,11 @@ var Attribute = React.createClass({
     
 var Attributes = React.createClass({
   renderAttribute: function (name) {
-    return <Attribute key={name} name={name} value={this.props.attributes[name]} scope={this.props.scope} to={this.props.attributeMap[name]} onChange={this.props.onChange} path={this.props.path.concat(['attributes', name])} />;
+    return <Attribute key={name} name={name}
+		      scope={this.props.scope} to={this.props.attributeMap[name]}
+		      onChange={this.props.onChange}
+		      path={this.props.path.concat(['attributes', name])}
+		      args={this.props.args} />;
   },
   render: function () {
     return <div>{this.props.attributeList.map(this.renderAttribute)}</div>;
@@ -275,6 +460,8 @@ var Draggable = React.createClass({
   },
   handleDragEnd: function () {
     this.props.scope.state.dragging = false;
+  },
+  handleDataChange: function (path, value) {
   },
   render: function () {
     return (
@@ -328,6 +515,7 @@ var Delay = React.createClass({
 		      }}
 		    scope={this.props.scope}
 		    attributes={this.props.attributes}
+		    args={this.props.args}
 		    path={this.props.path} />
       </div>
     );
@@ -353,7 +541,18 @@ var Osc = React.createClass({
       osc: osc,
       gain: gain,
       offset: offset,
-      attributes: this.props.attributes
+      attributes: this.props.attributes,
+      type: this.props.type
+    }
+  },
+  handleDataChange: function (path, value) {
+    if (!subpathOf(path, this.props.path)) return;
+    var p = path.slice(this.props.path.length);
+    if (p.length == 1 && p[0] == 'type') {
+      this.state.osc.type = value;
+      this.setState({
+	type: value
+      });
     }
   },
   connect: function (to) {
@@ -365,20 +564,21 @@ var Osc = React.createClass({
   },
   componentWillUnmount: function () {
     this.disconnect();
+    Store.off('CHANGED', this.handleDataChange);
   },
   handleTypeChange: function (event) {
-    this.state.osc.type = event.target.value;
-    this.props.scope.handleChange(this.props.path.concat(['type']), event.target.value);
+    Store.set(this.props.path.concat(['type']), event.target.value);
   },
   componentDidMount: function () {
     this.connect(this.props.to);
+    Store.on('CHANGED', this.handleDataChange);
   },
   render: function () {
     var types = ['sine', 'triangle', 'sawtooth', 'square'];
     return (
       <div className='node'>
 	{this.props.name}
-	<select onChange={this.handleTypeChange} value={this.props.type}>
+	<select onChange={this.handleTypeChange} value={this.state.type}>
 	  {types.map(function (t) {
 	     return <option key={t} value={t}>{t}</option>;
 	   })}
@@ -391,13 +591,21 @@ var Osc = React.createClass({
 		      }}
 		    scope={this.props.scope}
 		    attributes={this.props.attributes}
-		    path={this.props.path} />
+		    path={this.props.path}
+		    args={this.props.args} />
       </div>
     );
   }
 });
 
 var Index = React.createClass({
+  handleDataChange: function (path, value) {
+    if (!subpathOf(path, this.props.path)) return;
+    let p = path.slice(this.props.path.length);
+
+    if (p[0] == 'max')
+      this.setState({max: value});
+  },
   getInitialState: function () {
     var node = ctx.createScriptProcessor(BS, 1, 1);
     node.onaudioprocess = function (event) {
@@ -412,7 +620,7 @@ var Index = React.createClass({
 	if (i >= lastTick + samplesPerCycle) {
 	  lastTick = i;
 	  out++;
-	  if (out >= this.props.max) out -= this.props.max;
+	  if (out >= this.state.max) out -= this.state.max;
 	}
       }
       this.state.lastTick = lastTick - BS;
@@ -432,25 +640,29 @@ var Index = React.createClass({
     this.state.node.disconnect();
   },
   componentDidMount: function () {
+    Store.on('CHANGED', this.handleDataChange);
     this.connect(this.props.to);
   },
   componentWillUnmount: function () {
+    Store.off('CHANGED', this.handleDataChange);
     this.disconnect();
   },
   handleMaxChange: function (event) {
-    this.props.scope.handleChange(this.props.path.concat(['max']), event.target.value);
+    Store.set(this.props.path.concat(['max']), event.target.value);
   },
   render: function () {
     return (
       <div className='node'>
 	Index
-	<input type="number" onChange={this.handleMaxChange} value={this.props.max} />
+	<input type="number" onChange={this.handleMaxChange}
+	       value={Store.get(this.props.path.concat(['max']))} />
 	<Attributes attributeList={['seconds']}
 		    attributeMap={{
 			seconds: this.state.node,
 		      }}
 		    scope={this.props.scope}
 		    attributes={this.props.attributes}
+		    args={this.props.args}
 		    path={this.props.path} />
       </div>
     );
@@ -460,13 +672,16 @@ var Index = React.createClass({
 var Array = React.createClass({
   getInitialState: function () {
     var node = ctx.createScriptProcessor(BS, 1, 1);
+    let steps = this.get(['steps']);
+    let values = this.get(['values']);
+    let ticks = this.get(['ticks']);
     node.onaudioprocess = function (event) {
       var index = event.inputBuffer.getChannelData(0);
       var output = event.outputBuffer.getChannelData(0);
 
       for (var i = 0; i < BS; i++) {
-	var idx = Math.floor(index[0] / this.props.ticks) % this.props.steps.length;
-	output[i] = this.props.values[this.props.steps[idx]] || 0;
+	var idx = Math.floor(index[0] / this.state.ticks) % this.state.steps.length;
+	output[i] = this.state.values[this.state.steps[idx]] || 0;
       }
       setTimeout(function () {
 	if (idx != this.state.idx) {
@@ -483,7 +698,10 @@ var Array = React.createClass({
     return {
       node: node,
       gain: gain,
-      attributes: this.props.attributes
+      attributes: this.props.attributes,
+      steps: steps,
+      values: values,
+      ticks: ticks
     }
   },
   connect: function (to) {
@@ -494,31 +712,53 @@ var Array = React.createClass({
   disconnect: function () {
     this.state.gain.disconnect();
   },
-  handleValuesChange: function (vals) {
-    this.props.scope.handleChange(this.props.path.concat(['values']), vals);
+  handleDataChange: function (path, value) {
+    if (!subpathOf(path, this.props.path)) return;
+
+    let p = path.slice(this.props.path);
+
+    if (p[0] == 'steps')
+      this.state.steps = this.get('steps');
+    else if (p[0] == 'values')
+      this.state.steps = this.get('values');
+    else if (p[0] == 'ticks')
+      this.setState({ticks: this.get('ticks')});
   },
   componentDidMount: function () {
+    Store.on('CHANGED', this.handleDataChange);
     this.connect(this.props.to);
   },
   componentWillUnmount: function () {
+    Store.off('CHANGED', this.handleDataChange);
     this.disconnect();
   },
+  handleValuesChange: function (vals) {
+    Store.set(this.props.path.concat(['values']), vals);
+  },
   handleTicksChange: function (event) {
-    this.props.scope.handleChange(this.props.path.concat(['ticks']), event.target.value);
+    Store.set(this.props.path.concat(['ticks']), event.target.value);
+  },
+  get: function (p) {
+    return Store.get(this.props.path.concat(p));
   },
   render: function () {
     return (
       <div className='node'>
-	<input value={this.props.ticks} onChange={this.handleTicksChange} type="number" />
-      <Sequence values={this.props.values} steps={this.props.steps} onChange={this.handleValuesChange} scope={this.props.scope} path={this.props.path} index={this.state.idx} />
-      <Attributes attributeList={['base', 'index']}
-		  attributeMap={{
-		      base: this.state.gain.gain,
-		      index: this.state.node
-		    }}
-		  scope={this.props.scope}
-		  attributes={this.props.attributes}
-		  path={this.props.path} />
+	<input value={this.get(['ticks'])}
+	       onChange={this.handleTicksChange} type="number" />
+	<Sequence values={this.get(['values'])}
+		  steps={this.get(['steps'])}
+		  onChange={this.handleValuesChange} scope={this.props.scope}
+		  path={this.props.path} index={this.state.idx} />
+	<Attributes attributeList={['base', 'index']}
+		    attributeMap={{
+			base: this.state.gain.gain,
+			index: this.state.node
+		      }}
+		    scope={this.props.scope}
+		    attributes={this.props.attributes}
+		    args={this.props.args}
+		    path={this.props.path} />
       </div>
     );
   }
@@ -526,10 +766,11 @@ var Array = React.createClass({
 
 var Arithmetic = React.createClass({
   initNode: function () {
-    var node = ctx.createScriptProcessor(BS, this.state.vars.length, 1);
+    let vars = this.state.vars;
+    var node = ctx.createScriptProcessor(BS, vars.length, 1);
     var varMap = {};
-    for (var i = 0; i < this.state.vars.length; i++) {
-      varMap[this.state.vars[i]] = i;
+    for (var i = 0; i < vars.length; i++) {
+      varMap[vars[i]] = i;
     }
 
     node.onaudioprocess = function (event) {
@@ -543,29 +784,40 @@ var Arithmetic = React.createClass({
       }
     }.bind(this);
 
+    let merger = ctx.createChannelMerger(vars.length, 1);
+    merger.connect(node);
+    
+    let throughs = {};
     for (var i = 0; i < this.state.vars.length; i++) {
-      if (!this.state.throughs.hasOwnProperty(this.state.vars[i]))
-	this.state.throughs[this.state.vars[i]] = ctx.createGain();
-      this.state.throughs[this.state.vars[i]].connect(node, 0, i);
+      if (!throughs.hasOwnProperty(this.state.vars[i]))
+	throughs[this.state.vars[i]] = ctx.createGain();
+      throughs[this.state.vars[i]].connect(merger, 0, i);
     }
 
-    return node;
+    this.state.throughs = throughs;
+
+    this.state.node = node;
+  },
+  handleDataChange: function (path, value) {
+    if (!subpathOf(path, this.props.path)) return;
+    let p = path.slice(this.props.path.length);
+    if (p.length == 1 && p[0] == 'expression') {
+      try {
+	this.state.expression = math.compile(value);
+      } catch (e) {}
+      this.forceUpdate();
+    }
   },
   getInitialState: function () {
-    var exp = math.compile(this.props.expression);
-    
+    var exp = math.compile(Store.get(this.props.path.concat(['expression'])));
     return {
       expression: exp,
       node: null,
-      vars: ['x'],
-      throughs: {}
+      vars: ['x']
     };
   },
   handleExpressionChange: function (exp) {
-    try {
-      this.state.expression = math.compile(exp);
-    } catch (e) {}
-    this.props.scope.handleChange(this.props.path.concat(['expression']), exp);
+    Store.set(this.props.path.concat(['expression']), exp);
   },
   connect: function (to) {
     if (!to) return;
@@ -575,23 +827,27 @@ var Arithmetic = React.createClass({
     this.state.node.disconnect();
   },
   componentDidMount: function () {
-    if (this.state.node == null)
-      this.state.node = this.initNode();
-
+    Store.on('CHANGED', this.handleDataChange);
     this.connect(this.props.to);
   },
   componentWillUnmount: function () {
+    Store.off('CHANGED', this.handleDataChange);
     this.disconnect();
   },
   render: function () {
+    if (!this.state.node) this.initNode();
+    let attrs = Store.get(this.props.path.concat(['attributes']));
+    console.log(attrs);
     return (
       <div className='node'>
-      <Expression onChange={this.handleExpressionChange} value={this.props.expression} />
-      <Attributes attributeList={Object.keys(this.props.attributes)}
-		  attributeMap={this.state.throughs}
-		  scope={this.props.scope}
-		  attributes={this.props.attributes}
-		  path={this.props.path} />
+	<Expression onChange={this.handleExpressionChange}
+		    value={Store.get(this.props.path.concat(['expression']))} />
+	<Attributes attributeList={Object.keys(attrs)}
+		    attributeMap={this.state.throughs}
+		    scope={this.props.scope}
+		    attributes={attrs}
+		    args={this.props.args}
+		    path={this.props.path} />
       </div>
     );
   }
@@ -601,11 +857,27 @@ var Scope = React.createClass({
   getInitialState: function () {
     return {
       throughs: {},
-      destination: this.props.destination,
-      variables: this.props.variables,
       dragging: false,
       newVariableName: ''
     };
+  },
+  handleDataChange: function (path) {
+    if (path.length <= 2) {
+      this.forceUpdate();
+    }
+  },
+  handleDataDelete: function (path) {
+    if (subpathOf(path, ['destination'])) {
+      this.forceUpdate();
+    }
+  },
+  componentDidMount: function () {
+    Store.on('CHANGED', this.handleDataChange);
+    Store.on('DELETED', this.handleDataDelete);
+  },
+  componentWillUnmount: function () {
+    Store.off('CHANGED', this.handleDataChange);
+    Store.off('DELETED', this.handleDataDelete);
   },
   handleNameChange: function (event) {
     this.setState({
@@ -656,7 +928,7 @@ var Scope = React.createClass({
       if (thing == 'variable')
 	newNode = {
 	  tagName: Variable,
-	  name: Object.keys(this.state.variables)[0],
+	  name: Object.keys(Store.get(['variables']))[0],
 	  attributes: {}
 	};
       if (thing == 'index')
@@ -677,34 +949,54 @@ var Scope = React.createClass({
 	  }
 	};
       
-      var r = Math.random();
-      var dest = this.state.destination;
-      dest[r] = newNode;
-      this.setState({
-	destination: dest
-      });
-    }.bind(this);
+      Store.set(['destination', Math.random()], newNode);
+    }
+  },
+  _getAttributeMap: function (path, node) {
+    if (typeof node !== 'object') return [];
+
+    if (node.tagName === Value && node.value.toString().startsWith('~')) {
+      return [{
+	name: node.value,
+	path: path
+      }];
+    }
+
+    var ret = [];
+    for (var k in node) {
+      ret = ret.concat(this._getAttributeMap(path.concat([k]), node[k]));
+    }
+    return ret;
+  },
+  getAttributeMap: function (name) {
+    let variables = Store.get(['variables']);
+    if (!variables.hasOwnProperty(name)) return;
+    
+    var v = variables[name];
+
+    var atp = this._getAttributeMap([], v);
+    var attrsToPaths = {};
+    for (var i = 0; i < atp.length; i++) {
+      if (!attrsToPaths.hasOwnProperty(atp[i].name))
+	attrsToPaths[atp[i].name] = [];
+      attrsToPaths[atp[i].name].push(atp[i].path);
+    }
+    return attrsToPaths;
   },
   handleAddVariable: function () {
-    var vars = this.state.variables;
-    vars[this.state.newVariableName] = { tagName: Value, value: 0 };
+    Store.set(['variables', this.state.newVariableName], {tagName: Value, value: 0});
     this.setState({
-      variables: vars,
       newVariableName: ''
     });
   },
   handleChange: function (path, value) {
-    this.setState(Change(this.state, path, value));
+    Store.set(path, value);
   },
   handleDelete: function (path) {
-    this.setState(Delete(this.state, path));
+    Store.delete(path);
   },
   handleMove: function (from, to) {
-    this.setState(Change(
-      Change(this.state, to, Get(this.state, from)),
-      from,
-      from.length == 2 ? undefined : { tagName: Value, value: 0 }
-    ));
+    Store.move(from, to);
   },
   renderVariables: function (vars) {
     var ret = [];
@@ -750,48 +1042,106 @@ var Scope = React.createClass({
 	    <a href="#" onClick={this.handleAddClick('delay')}>delay</a>
 	  </div>
 	</div>
-	{this.renderVariables(this.state.variables)}
-	{this.renderDestination(this.state.destination)}
+	{this.renderVariables(Store.get(['variables']))}
+	{this.renderDestination(Store.get(['destination']))}
       </div>
     );
   }
 });
 
-var blankData = {
-  variables: {},
-  destination: {
-    t: {
-      tagName: Osc,
-      type: 'sine',
-      attributes: {
-	frequency: { tagName: Value, value: 110 },
-	gain: { tagName: Value, value: 1 },
-	offset: { tagName: Value, value: 0 }
+var Data = function (data) {
+  var _data = data || {
+    variables: {},
+    destination: {
+      t: {
+	tagName: Osc,
+	type: 'sine',
+	attributes: {
+	  frequency: { tagName: Value, value: 110 },
+	  gain: { tagName: Value, value: 1 },
+	  offset: { tagName: Value, value: 0 }
+	}
       }
     }
+  };
+
+  Object.defineProperty(this, 'data', {
+    get: function () { return _data; }
+  });
+
+  var _eventTypes = {
+    CHANGED: 'CHANGED',
+    DELETED: 'DELETED'
+  };
+    
+  var _listeners = {};
+  for (var evt in _eventTypes) {
+    _listeners[evt] = [];
   }
-};
+  
+  this.on = function (eventType, callback) {
+    _listeners[eventType].push(callback);
+  };
 
-function Change(original, path, value) {
-  if (value === undefined || value === false || value === null) return Delete(original, path);
-  if (path.length == 0) return value;
-  original[path[0]] = Change(original[path[0]], path.slice(1), value);
-  return original;
-};
+  this.off = function (eventType, callback) {
+    _listeners[eventType].splice(_listeners[eventType].indexOf(callback), 1);
+  };
 
-function Delete(original, path) {
-  if (path.length == 0) return original;
-  if (path.length == 1) {
-    delete original[path[0]];
+  this.emit = function (eventType, path, value) {
+    for (var i = 0; i < _listeners[eventType].length; i++) {
+      _listeners[eventType][i](path, value);
+    }
+  };
+
+  var _set = function (original, path, value) {
+    if (value === undefined || value === false || value === null) return _delete(path);
+    if (path.length == 0) return value;
+    original[path[0]] = _set(original[path[0]], path.slice(1), value);
     return original;
-  }
-  original[path[0]] = Delete(original[path[0]], path.slice(1));
-  return original;
+  };
+  this.set = function (path, value) {
+    _data = _set(_data, path, value);
+    this.emit('CHANGED', path, value);
+  };
+
+  var _delete = function (original, path) {
+    if (path.length == 0) return original;
+    if (path.length == 1) {
+      delete original[path[0]];
+      return original;
+    }
+    original[path[0]] = _delete(original[path[0]], path.slice(1));
+    return original;
+  };
+  this.delete = function (path) {
+    this.emit('DELETED', path);
+    _data = _delete(_data, path);
+  };
+
+  var _link = function (from, to) {
+    this.set(to, this.get(from));
+  };
+  this.link = _link.bind(this);
+
+  function _get(original, path) {
+    if (path.length == 0) return original;
+    return _get(original[path[0]], path.slice(1));
+  };
+  this.get = function (path) {
+    return _get(_data, path);
+  };
 };
 
-function Get(original, path) {
-  if (path.length == 0) return original;
-  return Get(original[path[0]], path.slice(1));
+function copy(obj) {
+  // return a deep copy of obj
+  if (Object.prototype.toString.call(obj) === '[object Array]') {
+    return obj.slice(0);
+  }
+  if (typeof obj !== 'object') return obj;
+  var ret = {};
+  for (var k in obj)
+    ret[k] = copy(obj[k]);
+  return ret;
 };
 
 function subpathOf(a, b) {
@@ -803,14 +1153,9 @@ function subpathOf(a, b) {
   return subpathOf(a.slice(1), b.slice(1));
 };
 
-var blank = (
-  <Scope name='test'
-	 variables={blankData.variables}
-	 destination={blankData.destination}
-  />
-);
+var Store = new Data;
 
 ReactDOM.render(
-  blank,
+  <Scope name='test' />,
   document.getElementById('root')
 );
